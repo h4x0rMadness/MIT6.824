@@ -23,7 +23,28 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
+type Args_Request struct {
 
+}
+
+type Reply_Request struct {
+	TaskType string
+	Task string
+	TaskNumber int
+	GeneralNum int
+}
+
+
+/// Report RPC struc
+type Args_Report struct {
+	TaskType string
+	Task string
+	TaskNumber int
+}
+
+type Reply_Report struct {
+
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.
