@@ -19,6 +19,9 @@ type Master struct {
 	mTasks []string
 	rTasks []string
 
+	mIndex int
+	rIndex int
+
 	mMapping map[string]int // filename -> taskNumber
 	rMapping map[string]int
 
@@ -29,7 +32,7 @@ type Master struct {
 
 	isDone bool
 
-	mu sync.mutex
+	mu sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -41,27 +44,36 @@ func (m *Master) Assign(args *Args_Request, reply *Reply_Request) error {
 
 	if m.phase == "map" {
 		reply.TaskType = "map"
-		reply.Task = m.mTasks[0] // always pick first one
+		reply.Task = m.mTasks[m.mIndex] // pick the one mIndex points to
 		reply.TaskNumber = m.mMapping[reply.Task]
 		reply.GeneralNum = m.nReduce
 
 		showTasks(m, "map")
 		showStates(m, "map")
+		showMapping(m, "map")
+		fmt.Printf("mIndex: %v", m.mIndex)
 		// call monitor in new thread
+
+		// m.mu.Lock()
 		go monitorTask(m, "map", reply.Task, reply.TaskNumber)
+		// m.mu.Unlock()
 
 	} else if m.phase == "reduce" {
 		fmt.Printf("reduce")
 
 		reply.TaskType = "reduce"
-		reply.Task = m.rTasks[0] // always pick first one
+		reply.Task = m.rTasks[m.rIndex] // pick the one rIndex points to
 		reply.TaskNumber = m.rMapping[reply.Task]
 		reply.GeneralNum = len(m.mStates)
+
 		showTasks(m, "reduce")
 		showStates(m, "reduce")
 		showMapping(m, "reduce")
+		fmt.Printf("rIndex: %v", m.rIndex)
 
+		// m.mu.Lock()
 		go monitorTask(m, "reduce", reply.Task, reply.TaskNumber)
+		// m.mu.Unlock()
 
 	} else {
 		fmt.Errorf("Wrong phase: %v", m.phase)
@@ -73,13 +85,17 @@ func (m *Master) Assign(args *Args_Request, reply *Reply_Request) error {
 
 func PhaseEndsValidate(m *Master) bool {
 	if m.phase == "map" {
-		if len(m.mTasks) == 0 {
+		if len(m.mTasks) == m.mIndex {
+			m.mu.Lock()
 			m.phase = "reduce"
+			m.mu.Unlock()
 		}
 		return false
 	} else {
-		if len(m.rTasks) == 0 {
+		if len(m.rTasks) == m.rIndex {
+			m.mu.Lock()
 			m.isDone = true
+			m.mu.Unlock()
 			return true
 		}
 		return false
@@ -96,7 +112,10 @@ func (m *Master) ReportDone(args *Args_Report, reply *Reply_Report) error {
 		if num != args.TaskNumber {
 			panic("This shit is not correct man!")
 		}
+		m.mu.Lock()
 		m.mStates[num] = true
+		m.mu.Unlock()
+		
 	} else if args.TaskType == "reduce" {
 		num := m.rMapping[args.Task]
 		fmt.Printf("\nReportDone: CheckDone for reduce task %v", num)
@@ -104,7 +123,10 @@ func (m *Master) ReportDone(args *Args_Report, reply *Reply_Report) error {
 		if num != args.TaskNumber {
 			panic("This shit is not correct man!")
 		}
+		m.mu.Lock()
 		m.rStates[num] = true
+		m.mu.Unlock()
+		
 	} else {
 		fmt.Printf("No such task type: %s!", args.TaskType)
 		panic("!!!")
@@ -172,8 +194,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.mMapping = initialMapping(files, "map", nReduce)
 	m.rMapping = initialMapping(files, "reduce", nReduce)
 
-	// m.rMapping = initial
-	// rMapping will be initialized in reduce phase
+	m.mIndex = 0
+	m.rIndex = 0
 
 	m.mStates = initialMapStates(files)
 	m.rStates = initialReduceStates(nReduce)
@@ -252,16 +274,32 @@ func monitorTask(m *Master, taskType string, task string, taskNumber int) {
 	// if not finished, skip this bc it is still at the top
 
 	if res {
-		index := 0
+		fmt.Printf("[monitorTask] Task: %s is finished! Moving index forward.", task)
 		if taskType == "map" {
-			m.mTasks = append(m.mTasks[:index], m.mTasks[index + 1:]...)
+			m.mu.Lock()
+			m.mIndex += 1
+			m.mu.Unlock()
 		} else {
-			m.rTasks = append(m.rTasks[:index], m.rTasks[index + 1:]...)
+			m.mu.Lock()
+			m.rIndex += 1
+			m.mu.Unlock()
 		}
-		fmt.Printf("[monitorTask] Task: %s is finished!", task)
-		return
+	} else {
+		fmt.Printf("[monitorTask] Task: %s not finished! Adding it to the end of task list.", task)
+
+		if taskType == "map" {
+			m.mu.Lock()
+			m.mTasks = append(m.mTasks, task)
+			m.mIndex += 1
+			m.mu.Unlock()
+		} else {
+			m.mu.Lock()
+			m.rTasks = append(m.rTasks, task)
+			m.rIndex += 1
+			m.mu.Unlock()
+		}
 	}
-	fmt.Printf("[monitorTask] Task: %s not finished!", task)
+	
 }
 
 // func clearTask() []string {

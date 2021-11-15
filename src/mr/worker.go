@@ -163,25 +163,10 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			}
 			ofile.Close()
-
-
-			// files, err := filepath.Glob("/mr-*")
-			// if err != nil {
-			//     panic(err)
-			// }
-			// for _, f := range files {
-			//     if err := os.Remove(f); err != nil {
-			//         panic(err)
-			//     }
-			// }
 		}
 
 		// Call back master to tell task finished & record file name
 		Report(taskType, task, taskNum)
-
-		// Encode file with json format if needed
-
-		// Indicate idle, restart loop
 
 		fmt.Printf("Worker thread ends, sleeping...")
 		time.Sleep(5 * time.Second)
