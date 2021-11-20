@@ -44,15 +44,16 @@ func ihash(key string) int {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+		
 	for true {
 		// Your worker implementation here.
-		fmt.Printf("Starting a worker...\n")
-
+		// fmt.Printf("Starting a worker...\n")
+		// fmt.Printf("\n  [Worker]Starting worker loop...")
 		// Require a task from master
-		taskReply := RequestTask()
+		taskReply, err := RequestTask()
 
-		if taskReply == (Reply_Request{}) {
-			fmt.Printf("RequestTask gets nil!")
+		if !err {
+			os.Exit(1)
 			return
 		}
 
@@ -64,13 +65,23 @@ func Worker(mapf func(string, string) []KeyValue,
 		taskNum := taskReply.TaskNumber
 		GeneralNum := taskReply.GeneralNum
 
-		fmt.Printf("RequestTask, file: %s, type: %s , num: %v, GeneralNum: %v", 
-			task, taskType, taskNum, GeneralNum)
+		// fmt.Printf("\n  [Worker]RequestTask, file: %s, type: %s , num: %v, GeneralNum: %v\n", 
+			// task, taskType, taskNum, GeneralNum)
+
+ 		// handle exceptions
+ 		if taskType == "wait" {
+ 			// fmt.Println("\n  [Worker]==========Worker waits ==============")
+ 			time.Sleep(1 * time.Second)
+ 			continue
+ 		} else if taskType == "end" {
+ 			// fmt.Println("\n  [Worker]==========Type is end, ending worker...==========")
+ 			return
+ 		}
 
 
 		// Transfer it to corresponding Map/Reduce function
 		if taskType == "map" {
-			fmt.Printf("Map Task Handling...")
+			// fmt.Printf("Map Task Handling...")
 
 			file, err := os.Open(task)
 
@@ -114,23 +125,23 @@ func Worker(mapf func(string, string) []KeyValue,
 				}
 				ofile.Close()
 			}
-		} else {
-			fmt.Printf("Reduce Task Handling...")
+		} else if taskType == "reduce"{
+			// fmt.Printf("Reduce Task Handling...")
 
 			oname := "mr-out-" + strconv.Itoa(taskNum)
 			ofile, _ := os.Create(oname)
 
-			ii := 0
-			for ii < GeneralNum {
-				fmt.Printf("\n ii: %v", ii)
-				// 
-				kva := make([]KeyValue, 0)
+			// for all mr-x-tasknum files add kva to a place
+			kva := make([]KeyValue, 0)
 
+			for ii := 0; ii < GeneralNum; ii++{
+				// fmt.Printf("\n ii: %v", ii)
+	
 				filename := "mr-" + strconv.Itoa(ii) + "-" + strconv.Itoa(taskNum) +".json"
 			    // file, _ := ioutil.ReadFile(filename)
 		    	file, _ := os.Open(filename)
 
-		    	fmt.Printf("\nReduce Loop filename:%s", filename)
+		    	// fmt.Printf("\nReduce Loop filename:%s", filename)
 				// decode json file
 				dec := json.NewDecoder(file)
 			  	for {
@@ -140,54 +151,60 @@ func Worker(mapf func(string, string) []KeyValue,
 			    	}
 			    	kva = append(kva, kv)
 			  	}
-				// throw to reduce function
-				i := 0
-				for i < len(kva) {
-					j := i + 1
-					for j < len(kva) && kva[j].Key == kva[i].Key {
-						j++
-					}
-					values := []string{}
-					for k := i; k < j; k++ {
-						values = append(values, kva[k].Value)
-					}
-					output := reducef(kva[i].Key, values)
-
-					// this is the correct format for each line of Reduce output.
-					fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
-
-					i = j
-				}
-				// write result
-				ii += 1
-
 			}
+
+
+			sort.Sort(ByKey(kva))
+			// throw to reduce function
+				
+			for i := 0; i < len(kva); {
+				j := i + 1
+				for j < len(kva) && kva[j].Key == kva[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, kva[k].Value)
+				}
+				output := reducef(kva[i].Key, values)
+
+				// this is the correct format for each line of Reduce output.
+				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+
+				
+				i = j
+			}
+
+
 			ofile.Close()
 		}
 
 		// Call back master to tell task finished & record file name
-		Report(taskType, task, taskNum)
+		if taskType == "map" || taskType == "reduce" {
+					Report(taskType, task, taskNum)
 
-		fmt.Printf("Worker thread ends, sleeping...")
-		time.Sleep(5 * time.Second)
+		}
+
+		// fmt.Printf("Worker thread ends, sleeping...")
+		time.Sleep(1 * time.Second)
 
 	}
 }
 
-func RequestTask() Reply_Request {
+func RequestTask() (Reply_Request, bool) {
 	args := Args_Request{}
 
 	// declare a reply structure
 	reply := Reply_Request{}
 
 	// send the RPC request, wait for the reply.
-	call("Master.Assign", &args, &reply)
+	error := call("Master.Assign", &args, &reply)
 
 
 	// reply
-	fmt.Printf("\n Calling RequestTask...")
+	// fmt.Printf("\n    [Worker]Calling RequestTask...")
 
-	return reply
+	return reply, error
 }
 
 func Report(taskType string, task string, taskNumber int) Reply_Report {
@@ -201,7 +218,7 @@ func Report(taskType string, task string, taskNumber int) Reply_Report {
 
 	call("Master.ReportDone", &args, &reply)
 
-	fmt.Printf("\nCalling Report for task: %s, type: %s", task, taskType)
+	// fmt.Printf("\n    [Worker]Calling Report for task: %s, type: %s", task, taskType)
 
 	return reply
 }
@@ -226,7 +243,7 @@ func CallExample() {
 	call("Master.Example", &args, &reply)
 
 	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
+	fmt.Printf("\nreply.Y %v\n", reply.Y)
 }
 
 //

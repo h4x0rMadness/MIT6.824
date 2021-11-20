@@ -32,105 +32,158 @@ type Master struct {
 
 	isDone bool
 
-	mu sync.Mutex
+
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (m *Master) Assign(args *Args_Request, reply *Reply_Request) error {
-	if PhaseEndsValidate(m) {
-		fmt.Printf("All Phase Ends...Calling Done.")
+	var mu sync.Mutex
+	
+
+	res := m.PhaseEndsValidate()
+
+	if res == "wait" || res == "end" {
+		reply.TaskType = res
 		return nil
-	}
+	} 
 
 	if m.phase == "map" {
+		mu.Lock()
+
+		// fmt.Printf("\n[Master]mIndex before: %v", m.mIndex)
+
+		m.mIndex += 1
+		// fmt.Printf("\n[Master]mIndex after: %v", m.mIndex)
 		reply.TaskType = "map"
-		reply.Task = m.mTasks[m.mIndex] // pick the one mIndex points to
+		reply.Task = m.mTasks[m.mIndex - 1] // pick the one mIndex points to
 		reply.TaskNumber = m.mMapping[reply.Task]
 		reply.GeneralNum = m.nReduce
 
-		showTasks(m, "map")
-		showStates(m, "map")
-		showMapping(m, "map")
-		fmt.Printf("mIndex: %v", m.mIndex)
+		// m.showTasks("map")
+		// m.showStates("map")
+		// m.showMapping("map")
+		// fmt.Printf("mIndex: %v", m.mIndex)
 		// call monitor in new thread
+		// fmt.Printf("\n  [Master]Assigning for task %s, taskNumber: %v", reply.Task, reply.TaskNumber)
 
-		// m.mu.Lock()
-		go monitorTask(m, "map", reply.Task, reply.TaskNumber)
+		
+		
+		mu.Unlock()
+
+		go m.monitorTask("map", reply.Task, reply.TaskNumber)
 		// m.mu.Unlock()
+		// fmt.Println
 
 	} else if m.phase == "reduce" {
-		fmt.Printf("reduce")
+		// fmt.Printf("reduce")
+		mu.Lock()
+
+		m.rIndex += 1
 
 		reply.TaskType = "reduce"
-		reply.Task = m.rTasks[m.rIndex] // pick the one rIndex points to
+		reply.Task = m.rTasks[m.rIndex - 1] // pick the one rIndex points to
 		reply.TaskNumber = m.rMapping[reply.Task]
 		reply.GeneralNum = len(m.mStates)
 
-		showTasks(m, "reduce")
-		showStates(m, "reduce")
-		showMapping(m, "reduce")
-		fmt.Printf("rIndex: %v", m.rIndex)
+		// m.showStates("reduce")
+		// 
 
 		// m.mu.Lock()
-		go monitorTask(m, "reduce", reply.Task, reply.TaskNumber)
+		
+		mu.Unlock()
+
+		go m.monitorTask("reduce", reply.Task, reply.TaskNumber)
 		// m.mu.Unlock()
 
-	} else {
-		fmt.Errorf("Wrong phase: %v", m.phase)
+	} else if m.phase == "done" {
+		m.isDone = true
+		// fmt.Println("`n!!!!!!!!Master set to done")
+		
 	}
 	
+	// m.mu.Unlock()
 
 	return nil
 }
 
-func PhaseEndsValidate(m *Master) bool {
+func (m *Master) PhaseEndsValidate() string{
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+
 	if m.phase == "map" {
-		if len(m.mTasks) == m.mIndex {
-			m.mu.Lock()
-			m.phase = "reduce"
-			m.mu.Unlock()
+		// if not pointing to the end, skip
+		if len(m.mTasks) > m.mIndex {
+			return ""
 		}
-		return false
-	} else {
-		if len(m.rTasks) == m.rIndex {
-			m.mu.Lock()
-			m.isDone = true
-			m.mu.Unlock()
-			return true
+		// if at the end, check all states
+		for _, v := range m.mStates {
+
+			// if not finished, but there is nothing to assign
+			// indicate this worker to skip and wait
+			if !v {
+				return "wait"
+			}
 		}
-		return false
+
+		// m.mu.Lock()
+		m.phase = "reduce"
+		// m.mu.Unlock()
+		return ""  
+
+
+	} else if m.phase == "reduce"{
+		
+		if len(m.rTasks) > m.rIndex {
+			return ""
+		}
+		for _, v := range m.rStates {
+			if !v {
+				return "wait"
+			}
+		}
+		// m.mu.Lock()
+		m.phase = "done"
+		// m.mu.Unlock()
+		return "end"
 	}
 
+	return ""
 }
 
 // when worker finished a task, ReportDone is called 
 func (m *Master) ReportDone(args *Args_Report, reply *Reply_Report) error {
+	var mu sync.Mutex
+	mu.Lock()
+	
+
 	if args.TaskType == "map" {
 		num := m.mMapping[args.Task]
-		fmt.Printf("\nReportDone: CheckDone for map task %v", num)
+		// fmt.Printf("\nReportDone: CheckDone for map task %v", num)
 
 		if num != args.TaskNumber {
 			panic("This shit is not correct man!")
 		}
-		m.mu.Lock()
+		// m.mu.Lock()
 		m.mStates[num] = true
-		m.mu.Unlock()
+		// m.mu.Unlock()
 		
 	} else if args.TaskType == "reduce" {
 		num := m.rMapping[args.Task]
-		fmt.Printf("\nReportDone: CheckDone for reduce task %v", num)
+		// fmt.Printf("\nReportDone: CheckDone for reduce task %v", num)
 
 		if num != args.TaskNumber {
 			panic("This shit is not correct man!")
 		}
-		m.mu.Lock()
+		// m.mu.Lock()
 		m.rStates[num] = true
-		m.mu.Unlock()
+		// m.mu.Unlock()
 		
 	} else {
-		fmt.Printf("No such task type: %s!", args.TaskType)
-		panic("!!!")
+		// fmt.Printf("No such task type: %s!", args.TaskType)
+		panic("\n!!!\n")
 	}
+	mu.Unlock()
 
 	return nil
 }
@@ -184,7 +237,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 
 	// initialization 
-	fmt.Printf("Starting initialization...")
+	// fmt.Printf("Starting initialization...")
 	m.nMap = len(files)
 	m.nReduce = nReduce
 
@@ -203,7 +256,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.phase = "map"
 	m.isDone = false
 
-	fmt.Printf("Starting server...")
+
+	// fmt.Printf("Starting server...")
 
 	m.server()
 	return &m
@@ -258,7 +312,7 @@ func initialMapTask(files []string) []string {
 	return mtasks
 }
 
-func monitorTask(m *Master, taskType string, task string, taskNumber int) {
+func (m *Master) monitorTask(taskType string, task string, taskNumber int) {
 	// sleep for time interval
 	time.Sleep(10 * time.Second)
 
@@ -270,33 +324,21 @@ func monitorTask(m *Master, taskType string, task string, taskNumber int) {
 		res = m.rStates[taskNumber]
 	}
 
-	// if finished, clear it from tasks
-	// if not finished, skip this bc it is still at the top
-
 	if res {
-		fmt.Printf("[monitorTask] Task: %s is finished! Moving index forward.", task)
-		if taskType == "map" {
-			m.mu.Lock()
-			m.mIndex += 1
-			m.mu.Unlock()
-		} else {
-			m.mu.Lock()
-			m.rIndex += 1
-			m.mu.Unlock()
-		}
+		// fmt.Printf("\n[monitorTask] Task: %s is finished!", task)
 	} else {
-		fmt.Printf("[monitorTask] Task: %s not finished! Adding it to the end of task list.", task)
+		// fmt.Printf("\n[monitorTask] Task: %s not finished! Adding it to the end of task list.", task)
 
 		if taskType == "map" {
-			m.mu.Lock()
+			// m.mu.Lock()
 			m.mTasks = append(m.mTasks, task)
-			m.mIndex += 1
-			m.mu.Unlock()
-		} else {
-			m.mu.Lock()
+			// m.mIndex += 1
+			// m.mu.Unlock()
+		} else if taskType == "reduce"{
+			// m.mu.Lock()
 			m.rTasks = append(m.rTasks, task)
-			m.rIndex += 1
-			m.mu.Unlock()
+			// m.rIndex += 1
+			// m.mu.Unlock()
 		}
 	}
 	
@@ -305,8 +347,8 @@ func monitorTask(m *Master, taskType string, task string, taskNumber int) {
 // func clearTask() []string {
 // 	ss=append(ss[:index],ss[index+1:]...)
 // }
-func showStates(m *Master, taskType string) {
-	fmt.Printf("\n %s showStates:\n", taskType)
+func (m *Master) showStates(taskType string) {
+	// fmt.Printf("\n %s showStates:\n", taskType)
 	if taskType == "map" {
 		for k, v := range m.mStates {
 			fmt.Printf("%v -> %v\n", k, v)
@@ -317,7 +359,7 @@ func showStates(m *Master, taskType string) {
 		}
 	}
 }
-func showTasks(m *Master, taskType string) {
+func (m *Master) showTasks(taskType string) {
 	fmt.Printf("\n %s showTasks:\n", taskType)
 	if taskType == "map" {
 		for k, v := range m.mTasks {
@@ -331,7 +373,7 @@ func showTasks(m *Master, taskType string) {
 	
 }
 
-func showMapping(m *Master, taskType string) {
+func (m *Master) showMapping(taskType string) {
 	fmt.Printf("\n %s showMapping:\n", taskType)
 	if taskType == "map" {
 		for k, v := range m.mMapping {
@@ -346,11 +388,10 @@ func showMapping(m *Master, taskType string) {
 
 func initialReduceTask(nReduce int) []string {
 	ret := make([]string, 0)
-	i := nReduce - 1
+	
 
-	for i >= 0 {
+	for i := 0; i < nReduce; i++ {
 		ret = append(ret, strconv.Itoa(i))
-		i -= 1
 	}
 
 	return ret
