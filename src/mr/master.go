@@ -96,8 +96,10 @@ func (m *Master) Assign(args *Args_Request, reply *Reply_Request) error {
 		// m.mu.Unlock()
 
 	} else if m.phase == "done" {
+		mu.Lock()
 		m.isDone = true
 		// fmt.Println("`n!!!!!!!!Master set to done")
+		mu.Unlock()
 		
 	}
 	
@@ -110,9 +112,9 @@ func (m *Master) PhaseEndsValidate() string{
 	var mu sync.Mutex
 	mu.Lock()
 	defer mu.Unlock()
-
 	if m.phase == "map" {
 		// if not pointing to the end, skip
+
 		if len(m.mTasks) > m.mIndex {
 			return ""
 		}
@@ -147,7 +149,7 @@ func (m *Master) PhaseEndsValidate() string{
 		// m.mu.Unlock()
 		return "end"
 	}
-
+	// mu.Unlock()
 	return ""
 }
 
@@ -220,6 +222,10 @@ func (m *Master) server() {
 // if the entire job has finished.
 //
 func (m *Master) Done() bool {
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+
 	ret := m.isDone
 
 	// Your code here.
@@ -313,15 +319,23 @@ func initialMapTask(files []string) []string {
 }
 
 func (m *Master) monitorTask(taskType string, task string, taskNumber int) {
+	var mu sync.Mutex
+	// mu.Lock()
 	// sleep for time interval
 	time.Sleep(10 * time.Second)
 
 	var res bool
 	// check if the task is finished
 	if taskType == "map" {
+		mu.Lock()
 		res = m.mStates[taskNumber]
+		mu.Unlock()
+
 	} else {
+		mu.Lock()
 		res = m.rStates[taskNumber]
+		mu.Unlock()
+
 	}
 
 	if res {
@@ -330,17 +344,18 @@ func (m *Master) monitorTask(taskType string, task string, taskNumber int) {
 		// fmt.Printf("\n[monitorTask] Task: %s not finished! Adding it to the end of task list.", task)
 
 		if taskType == "map" {
-			// m.mu.Lock()
+			mu.Lock()
 			m.mTasks = append(m.mTasks, task)
 			// m.mIndex += 1
-			// m.mu.Unlock()
+			mu.Unlock()
 		} else if taskType == "reduce"{
-			// m.mu.Lock()
+			mu.Lock()
 			m.rTasks = append(m.rTasks, task)
 			// m.rIndex += 1
-			// m.mu.Unlock()
+			mu.Unlock()
 		}
 	}
+	// mu.Unlock()
 	
 }
 
