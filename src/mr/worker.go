@@ -10,6 +10,7 @@ import "strconv"
 import "encoding/json"
 import "sort"
 import "time"
+// import "sync"
 
 
 
@@ -44,6 +45,7 @@ func ihash(key string) int {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+		// var mu sync.Mutex
 		
 	for true {
 		// Your worker implementation here.
@@ -106,30 +108,62 @@ func Worker(mapf func(string, string) []KeyValue,
 			}
 
 			for key, pairs := range container {
-	    		curFileName := "mr-" + bucketX + "-" + strconv.Itoa(key) +".json"
+				path, err := os.Getwd()
+				if err != nil {
+				    log.Println(err)
+				}
 
-	    		ofile, _ := os.Create(curFileName)
+				// curFileName := "mr-" + bucketX + "-" + strconv.Itoa(key) +".json"
+
+			    f, _ := ioutil.TempFile(path, "map")
+
+	    		// ofile, _ := os.Create(curFileName)
 
 	    		lines := ""
 
 	    		for _, kv := range pairs {
-	    			str := "\n" + kv.Key + " " + kv.Value
+	    			str := kv.Key + " " + kv.Value + "\n"
 					lines += str
 	    		}
 
-	    		ioutil.WriteFile(curFileName, []byte(lines), 0644)
+			    ioutil.WriteFile(f.Name(), []byte(lines), 0644)
+
+	    		// ioutil.WriteFile(curFileName, []byte(lines), 0644)
 	    		
-	    		enc := json.NewEncoder(ofile)
+	    		enc := json.NewEncoder(f)
+	    		// enc := json.NewEncoder(ofile)
 				for _, kv := range pairs {
 			    	enc.Encode(&kv)		
 				}
-				ofile.Close()
+				
+				// ofile.Close()
+				f.Close()
+				newFileName := "mr-" + bucketX + "-" + strconv.Itoa(key) +".json"
+
+				// pfile1, _ := os.Open(f.Name())
+			    
+		  //       pfile1.Close()
+
+		        os.Rename(f.Name(), newFileName)   
+
+				// fmt.Printf("\nOld: %s, new: %s", f.Name(), newFileName)
+				// mu.Lock()
+				// os.Rename(f.Name(), newFileName)
+				// mu.Unlock()
+				// f.Close()
+
 			}
 		} else if taskType == "reduce"{
 			// fmt.Printf("Reduce Task Handling...")
 
-			oname := "mr-out-" + strconv.Itoa(taskNum)
-			ofile, _ := os.Create(oname)
+			// oname := "mr-out-" + strconv.Itoa(taskNum)
+			// ofile, _ := os.Create(oname)
+			path, err := os.Getwd()
+			if err != nil {
+			    log.Println(err)
+			}
+		    f, _ := ioutil.TempFile(path, "reduce")
+
 
 			// for all mr-x-tasknum files add kva to a place
 			kva := make([]KeyValue, 0)
@@ -169,14 +203,19 @@ func Worker(mapf func(string, string) []KeyValue,
 				output := reducef(kva[i].Key, values)
 
 				// this is the correct format for each line of Reduce output.
-				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+				fmt.Fprintf(f, "%v %v\n", kva[i].Key, output)
+				// fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
 
 				
 				i = j
 			}
 
 
-			ofile.Close()
+			// ofile.Close()
+			f.Close()
+			newFileName := "mr-out-" + strconv.Itoa(taskNum)
+	        os.Rename(f.Name(), newFileName)   
+
 		}
 
 		// Call back master to tell task finished & record file name
